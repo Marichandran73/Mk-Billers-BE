@@ -339,8 +339,9 @@ def delete_company_access(
 def forgot_password(payload: ForgotPasswordPayload, db: Session = Depends(get_db)) -> ForgotPasswordResponse:
     user = db.query(User).filter(User.email == payload.email).first()
     if not user:
-        return ForgotPasswordResponse(
-            message="If this account exists, a password reset link has been generated.",
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="If this account does not exist, a password reset link has not been generated.",
         )
 
     reset_token, _ = _create_setup_token(db, user)
