@@ -5,9 +5,16 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
 
-is_sqlite = settings.database_url.startswith("sqlite")
+
+def _normalize_database_url(database_url: str) -> str:
+    if database_url.startswith("postgresql://"):
+        return database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+    return database_url
+
+database_url = _normalize_database_url(settings.database_url)
+is_sqlite = database_url.startswith("sqlite")
 engine_kwargs = {"connect_args": {"check_same_thread": False}} if is_sqlite else {}
-engine = create_engine(settings.database_url, pool_pre_ping=not is_sqlite, **engine_kwargs)
+engine = create_engine(database_url, pool_pre_ping=not is_sqlite, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
