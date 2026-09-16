@@ -18,7 +18,11 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_password: str | None = None
     smtp_from_email: str = "no-reply@mk-billers.local"
+    smtp_from_name: str = "MK-BILLERS"
     smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    invite_code_expire_minutes: int = 60
+    non_super_admin_bill_limit: int = 6
 
     class Config:
         env_file = ".env"

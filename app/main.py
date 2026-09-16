@@ -32,11 +32,17 @@ def ensure_schema_updates() -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
         company_columns = {column["name"] for column in inspector.get_columns("companies")}
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
         if "is_active" not in company_columns:
             if engine.dialect.name == "sqlite":
                 connection.execute(text("ALTER TABLE companies ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
             else:
                 connection.execute(text("ALTER TABLE companies ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "is_active" not in user_columns:
+            if engine.dialect.name == "sqlite":
+                connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+            else:
+                connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
 
 
 def seed_default_company(db: Session) -> None:

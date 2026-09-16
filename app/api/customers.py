@@ -3,10 +3,10 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_active_admin_company
+from app.api.deps import get_current_user, require_admin_or_super
 from app.database.connection import get_db
 from app.models import Customer, User
-from app.schemas import CustomerBase, CustomerSchema
+from app.schemas import CustomerPayload, CustomerSchema
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -22,9 +22,9 @@ def list_customers(search: str = "", db: Session = Depends(get_db), user: User =
 
 @router.post("", response_model=CustomerSchema, status_code=201)
 def create_customer(
-    payload: CustomerBase,
+    payload: CustomerPayload,
     db: Session = Depends(get_db),
-    user: User = Depends(require_active_admin_company),
+    user: User = Depends(require_admin_or_super),
 ) -> Customer:
     customer = Customer(company_id=user.company_id, **payload.model_dump())
     db.add(customer)
@@ -46,7 +46,7 @@ def get_customer(customer_id: int, db: Session = Depends(get_db), user: User = D
 
 
 @router.put("/{customer_id}", response_model=CustomerSchema)
-def update_customer(customer_id: int, payload: CustomerBase, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Customer:
+def update_customer(customer_id: int, payload: CustomerPayload, db: Session = Depends(get_db), user: User = Depends(require_admin_or_super)) -> Customer:
     customer = get_customer(customer_id, db, user)
     for key, value in payload.model_dump().items():
         setattr(customer, key, value)
@@ -60,7 +60,7 @@ def update_customer(customer_id: int, payload: CustomerBase, db: Session = Depen
 
 
 @router.delete("/{customer_id}", status_code=204)
-def delete_customer(customer_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+def delete_customer(customer_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin_or_super)) -> None:
     customer = get_customer(customer_id, db, user)
     db.delete(customer)
     db.commit()

@@ -3,13 +3,33 @@ from sqlalchemy import extract, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_active_admin_company, require_admin_or_super
+from app.core.config import settings
 from app.database.connection import get_db
 from app.models import Bill, Customer, User
 from app.schemas import BillPayload, BillSchema, PaginatedBills
 from app.services.billing import calculate_totals, generate_invoice_number, replace_bill_items
 
 router = APIRouter(prefix="/bills", tags=["bills"])
+
+
+def ensure_bill_write_access(db: Session, user: User) -> None:
+    role = user.role.upper()
+    if role == "ADMIN" and not user.company.is_active:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have access to create user or report",
+        )
+    if role == "STAFF":
+        bill_count = db.query(Bill.id).filter(Bill.company_id == user.company_id).count()
+        if bill_count >= settings.non_super_admin_bill_limit:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Staff users can create only {settings.non_super_admin_bill_limit} bills. "
+                    "Bill actions are disabled after this limit."
+                ),
+            )
 
 
 def scoped_bill(db: Session, bill_id: int, company_id: int) -> Bill:
@@ -32,7 +52,6 @@ def list_bills(
     month: int | None = Query(None, ge=1, le=12),
     year: int | None = Query(None, ge=2000, le=2100),
     customer_id: int | None = None,
-    status: str | None = None,
     sort_by: str = "invoice_date",
     sort_order: str = "desc",
     db: Session = Depends(get_db),
@@ -48,8 +67,6 @@ def list_bills(
         query = query.filter(extract("year", Bill.invoice_date) == year)
     if customer_id:
         query = query.filter(Bill.customer_id == customer_id)
-    if status:
-        query = query.filter(Bill.status == status)
     total = query.count()
     sort_column = getattr(Bill, sort_by, Bill.invoice_date)
     query = query.order_by(sort_column.asc() if sort_order == "asc" else sort_column.desc())
@@ -58,7 +75,8 @@ def list_bills(
 
 
 @router.post("", response_model=BillSchema, status_code=201)
-def create_bill(payload: BillPayload, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Bill:
+def create_bill(payload: BillPayload, db: Session = Depends(get_db), user: User = Depends(require_active_admin_company)) -> Bill:
+    ensure_bill_write_access(db, user)
     customer = db.query(Customer).filter(Customer.id == payload.customer_id, Customer.company_id == user.company_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -79,6 +97,7 @@ def create_bill(payload: BillPayload, db: Session = Depends(get_db), user: User 
         **totals,
     )
     db.add(bill)
+
     replace_bill_items(db, bill, payload.items)
     try:
         db.commit()
@@ -95,6 +114,7 @@ def get_bill(bill_id: int, db: Session = Depends(get_db), user: User = Depends(g
 
 @router.put("/{bill_id}", response_model=BillSchema)
 def update_bill(bill_id: int, payload: BillPayload, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> Bill:
+    ensure_bill_write_access(db, user)
     bill = scoped_bill(db, bill_id, user.company_id)
     customer = db.query(Customer).filter(Customer.id == payload.customer_id, Customer.company_id == user.company_id).first()
     if not customer:
@@ -123,6 +143,7 @@ def update_bill(bill_id: int, payload: BillPayload, db: Session = Depends(get_db
 
 @router.delete("/{bill_id}", status_code=204)
 def delete_bill(bill_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    ensure_bill_write_access(db, user)
     bill = scoped_bill(db, bill_id, user.company_id)
     db.delete(bill)
     db.commit()
