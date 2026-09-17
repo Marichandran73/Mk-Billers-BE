@@ -18,6 +18,27 @@ Health endpoint:
 
 GET /api/health
 
+## SMTP Setup For Invite Mail
+
+Configure SMTP in `.env` to send invite OTP mail:
+
+- `SMTP_HOST` (for Gmail: `smtp.gmail.com`)
+- `SMTP_PORT` (`587` for TLS, `465` for SSL)
+- `SMTP_USER` (your sender email)
+- `SMTP_PASSWORD` (for Gmail, use App Password)
+- `SMTP_FROM_EMAIL` (from address shown in email)
+- `SMTP_FROM_NAME` (display name)
+- `SMTP_USE_TLS` (`true` for port 587)
+- `SMTP_USE_SSL` (`true` for port 465)
+- `INVITE_CODE_EXPIRE_MINUTES` (`60` for 1 hour)
+
+Recommended for Gmail:
+
+- `SMTP_HOST=smtp.gmail.com`
+- `SMTP_PORT=587`
+- `SMTP_USE_TLS=true`
+- `SMTP_USE_SSL=false`
+
 ## Render Deployment
 
 This folder includes [render.yaml](render.yaml) and [Procfile](Procfile).
