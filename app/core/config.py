@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "mk-billers2000"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 720
-    cors_origins: str = "http://localhost:2001"
+    cors_origins: str = "https://mkbillers.netlify.app"
     seed_admin_email: str | None = None
     seed_admin_password: str | None = None
     seed_company_name: str = "MK-BILLERS"
