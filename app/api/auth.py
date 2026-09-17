@@ -46,7 +46,7 @@ def _require_super_admin(user: User) -> None:
 
 
 def _setup_link(token: str) -> str:
-    base_url = settings.cors_origin_list[0] if settings.cors_origin_list else "http://localhost:5173"
+    base_url = settings.cors_origin_list[0] if settings.cors_origin_list else "https://mkbillers.netlify.app"
     return f"{base_url}/set-password?token={token}"
 
 
