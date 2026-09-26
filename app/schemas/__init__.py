@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
@@ -238,6 +238,43 @@ class CustomerSchema(CustomerBase):
     id: int
 
 
+class LetterPadPayload(BaseModel):
+    customer_id: int | None = None
+    letter_type: str = "QUOTATION"
+    title: str = Field(min_length=1, max_length=180)
+    subject: str | None = Field(default=None, max_length=255)
+    content: str = Field(min_length=1, max_length=12000)
+    quotation_amount: float | None = Field(default=None, ge=0)
+    valid_until: date | None = None
+    footer_text: str | None = None
+
+    @field_validator("letter_type")
+    @classmethod
+    def valid_letter_type(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in {"QUOTATION", "LETTER", "CUSTOM"}:
+            raise ValueError("letter_type must be QUOTATION, LETTER or CUSTOM")
+        return normalized
+
+    @field_validator("title", "content", mode="before")
+    @classmethod
+    def required_trimmed_fields(cls, value: str) -> str:
+        if value is None:
+            raise ValueError("Field is required")
+        cleaned = str(value).strip()
+        if not cleaned:
+            raise ValueError("Field is required")
+        return cleaned
+
+
+class LetterPadSchema(LetterPadPayload):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    customer: CustomerSchema | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class BillItemPayload(BaseModel):
     description: str = Field(min_length=1, max_length=255)
     quantity: float = Field(gt=0)
@@ -317,6 +354,89 @@ class InvoiceSettingsSchema(BaseModel):
     signature: str | None = None
     footer_text: str | None = None
     invoice_prefix: str = "INV"
+    invoice_template: str = "template-1"
+
+
+class CustomTemplateFieldSchema(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    label: str = Field(min_length=1, max_length=120)
+    x: float = Field(ge=0)
+    y: float = Field(ge=0)
+    font_size: int = Field(default=14, ge=8, le=48)
+    width: float | None = Field(default=None, ge=40)
+    align: str = "left"
+    font_family: str = "Poppins, sans-serif"
+    font_weight: int = Field(default=500, ge=100, le=900)
+    font_style: str = "normal"
+    text_color: str = "#0f172a"
+    use_gradient: bool = False
+    gradient_from: str | None = "#0f172a"
+    gradient_to: str | None = "#334155"
+    gradient_angle: int = Field(default=90, ge=0, le=360)
+
+    @field_validator("align")
+    @classmethod
+    def valid_align(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"left", "center", "right"}:
+            raise ValueError("align must be left, center or right")
+        return normalized
+
+    @field_validator("font_style")
+    @classmethod
+    def valid_font_style(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"normal", "italic"}:
+            raise ValueError("font_style must be normal or italic")
+        return normalized
+
+
+class CustomTemplateImageSchema(BaseModel):
+    id: str = Field(min_length=1, max_length=120)
+    data_url: str = Field(min_length=1)
+    x: float = Field(ge=0)
+    y: float = Field(ge=0)
+    width: float = Field(ge=20)
+    height: float = Field(ge=20)
+    fit: str = "contain"
+    crop_x: float = Field(default=50, ge=0, le=100)
+    crop_y: float = Field(default=50, ge=0, le=100)
+    zoom: float = Field(default=100, ge=20, le=400)
+    opacity: float = Field(default=1, ge=0.1, le=1)
+    rotation: float = Field(default=0, ge=-180, le=180)
+
+    @field_validator("fit")
+    @classmethod
+    def valid_fit(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"contain", "cover"}:
+            raise ValueError("fit must be contain or cover")
+        return normalized
+
+
+class UserInvoiceTemplateSchema(BaseModel):
+    page_width: int = Field(default=794, ge=400, le=1600)
+    page_height: int = Field(default=1123, ge=500, le=2400)
+    background_image: str | None = None
+    background_fit: str = "cover"
+    background_x: float = Field(default=50, ge=0, le=100)
+    background_y: float = Field(default=50, ge=0, le=100)
+    background_zoom: float = Field(default=100, ge=20, le=400)
+    background_opacity: float = Field(default=1, ge=0.1, le=1)
+    use_background_gradient: bool = True
+    background_gradient_from: str = "#ffffff"
+    background_gradient_to: str = "#f8fafc"
+    background_gradient_angle: int = Field(default=180, ge=0, le=360)
+    fields: list[CustomTemplateFieldSchema]
+    images: list[CustomTemplateImageSchema] = Field(default_factory=list)
+
+    @field_validator("background_fit")
+    @classmethod
+    def valid_background_fit(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"contain", "cover"}:
+            raise ValueError("background_fit must be contain or cover")
+        return normalized
 
 
 class DashboardStats(BaseModel):
