@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from app.api import auth, bills, company, customers, dashboard, reports, settings as invoice_settings
+from app.api import auth, bills, company, customers, dashboard, letters, reports, settings as invoice_settings
 from app.core.config import settings
 from app.core.security import hash_password
 from app.database.connection import Base, SessionLocal, engine
@@ -24,6 +24,7 @@ app.include_router(dashboard.router, prefix="/api")
 app.include_router(company.router, prefix="/api")
 app.include_router(customers.router, prefix="/api")
 app.include_router(bills.router, prefix="/api")
+app.include_router(letters.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(invoice_settings.router, prefix="/api")
 
@@ -33,6 +34,7 @@ def ensure_schema_updates() -> None:
         inspector = inspect(connection)
         company_columns = {column["name"] for column in inspector.get_columns("companies")}
         user_columns = {column["name"] for column in inspector.get_columns("users")}
+        invoice_settings_columns = {column["name"] for column in inspector.get_columns("invoice_settings")}
         if "is_active" not in company_columns:
             if engine.dialect.name == "sqlite":
                 connection.execute(text("ALTER TABLE companies ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
@@ -43,6 +45,15 @@ def ensure_schema_updates() -> None:
                 connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
             else:
                 connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "invoice_template" not in invoice_settings_columns:
+            if engine.dialect.name == "sqlite":
+                connection.execute(
+                    text("ALTER TABLE invoice_settings ADD COLUMN invoice_template TEXT NOT NULL DEFAULT 'template-1'")
+                )
+            else:
+                connection.execute(
+                    text("ALTER TABLE invoice_settings ADD COLUMN invoice_template VARCHAR(40) NOT NULL DEFAULT 'template-1'")
+                )
 
 
 def seed_default_company(db: Session) -> None:

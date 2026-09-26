@@ -30,6 +30,7 @@ class Company(Base):
     users: Mapped[list["User"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     customers: Mapped[list["Customer"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     bills: Mapped[list["Bill"]] = relationship(back_populates="company", cascade="all, delete-orphan")
+    letters: Mapped[list["LetterPad"]] = relationship(back_populates="company", cascade="all, delete-orphan")
     invoice_settings: Mapped["InvoiceSettings"] = relationship(back_populates="company", cascade="all, delete-orphan")
 
 
@@ -47,6 +48,11 @@ class User(Base):
 
     company: Mapped[Company] = relationship(back_populates="users")
     invites: Mapped[list["UserInvite"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    custom_invoice_template: Mapped["UserInvoiceTemplate | None"] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class UserInvite(Base):
@@ -82,6 +88,27 @@ class Customer(Base):
 
     company: Mapped[Company] = relationship(back_populates="customers")
     bills: Mapped[list["Bill"]] = relationship(back_populates="customer")
+    letters: Mapped[list["LetterPad"]] = relationship(back_populates="customer")
+
+
+class LetterPad(Base):
+    __tablename__ = "letter_pads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), index=True, nullable=False)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), index=True)
+    letter_type: Mapped[str] = mapped_column(String(20), default="QUOTATION", nullable=False)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    quotation_amount: Mapped[float | None] = mapped_column(Float)
+    valid_until: Mapped[date | None] = mapped_column(Date)
+    footer_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    company: Mapped[Company] = relationship(back_populates="letters")
+    customer: Mapped[Customer | None] = relationship(back_populates="letters")
 
 
 class Bill(Base):
@@ -141,5 +168,18 @@ class InvoiceSettings(Base):
     signature: Mapped[str | None] = mapped_column(Text)
     footer_text: Mapped[str | None] = mapped_column(Text)
     invoice_prefix: Mapped[str] = mapped_column(String(12), default="INV", nullable=False)
+    invoice_template: Mapped[str] = mapped_column(String(40), default="template-1", nullable=False)
 
     company: Mapped[Company] = relationship(back_populates="invoice_settings")
+
+
+class UserInvoiceTemplate(Base):
+    __tablename__ = "user_invoice_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False)
+    layout_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="custom_invoice_template")
