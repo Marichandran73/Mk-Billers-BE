@@ -1,12 +1,21 @@
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_active_admin_company
+from app.api.deps import get_current_user, require_active_admin_company, require_admin_or_super
+from app.core.plans import get_plan, list_plans, normalize_plan_code
 from app.database.connection import get_db
-from app.models import Company, InvoiceSettings, User, UserInvoiceTemplate
-from app.schemas import InvoiceSettingsSchema, UserInvoiceTemplateSchema
+from app.models import Bill, Company, InvoiceSettings, User, UserInvoiceTemplate
+from app.schemas import (
+    CurrentPlanSchema,
+    InvoiceSettingsSchema,
+    PlanSchema,
+    PlanSelectionPayload,
+    PlanSelectionResponse,
+    PlanUsageSchema,
+    UserInvoiceTemplateSchema,
+)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -75,6 +84,87 @@ def get_or_create_user_template(db: Session, user: User) -> UserInvoiceTemplate:
     db.commit()
     db.refresh(template)
     return template
+
+
+def build_current_plan_response(db: Session, user: User) -> CurrentPlanSchema:
+    company = db.query(Company).filter(Company.id == user.company_id).first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    plan = get_plan(company.plan_code)
+    bill_limit = plan["bill_limit"]
+    user_limit = plan["user_limit"]
+
+    bills_used = db.query(Bill.id).filter(Bill.company_id == user.company_id).count()
+    users_used = db.query(User.id).filter(User.company_id == user.company_id, User.is_active.is_(True)).count()
+
+    bill_usage_percent: float | None = None
+    user_usage_percent: float | None = None
+    if bill_limit and bill_limit > 0:
+        bill_usage_percent = round(min(100.0, (bills_used / bill_limit) * 100), 2)
+    if user_limit and user_limit > 0:
+        user_usage_percent = round(min(100.0, (users_used / user_limit) * 100), 2)
+
+    return CurrentPlanSchema(
+        code=plan["code"],
+        name=plan["name"],
+        monthly_price_inr=plan["monthly_price_inr"],
+        bill_limit=bill_limit,
+        user_limit=user_limit,
+        features=plan["features"],
+        rules=plan["rules"],
+        usage=PlanUsageSchema(
+            bills_used=bills_used,
+            users_used=users_used,
+            bill_limit=bill_limit,
+            user_limit=user_limit,
+            bill_usage_percent=bill_usage_percent,
+            user_usage_percent=user_usage_percent,
+        ),
+    )
+
+
+@router.get("/plans", response_model=list[PlanSchema])
+def get_plans(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[PlanSchema]:
+    current_code = normalize_plan_code(user.company.plan_code)
+    return [
+        PlanSchema(
+            code=plan["code"],
+            name=plan["name"],
+            monthly_price_inr=plan["monthly_price_inr"],
+            bill_limit=plan["bill_limit"],
+            user_limit=plan["user_limit"],
+            features=plan["features"],
+            rules=plan["rules"],
+            current=plan["code"] == current_code,
+        )
+        for plan in list_plans()
+    ]
+
+
+@router.get("/plans/current", response_model=CurrentPlanSchema)
+def get_current_plan(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> CurrentPlanSchema:
+    return build_current_plan_response(db, user)
+
+
+@router.put("/plans/current", response_model=PlanSelectionResponse)
+def update_current_plan(
+    payload: PlanSelectionPayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin_or_super),
+) -> PlanSelectionResponse:
+    company = db.query(Company).filter(Company.id == user.company_id).first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    company.plan_code = payload.code
+    db.commit()
+    db.refresh(company)
+
+    return PlanSelectionResponse(
+        message=f"Current plan updated to {get_plan(company.plan_code)['name']}",
+        current_plan=build_current_plan_response(db, user),
+    )
 
 
 @router.get("/invoice", response_model=InvoiceSettingsSchema)

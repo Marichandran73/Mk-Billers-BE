@@ -13,6 +13,7 @@ class CompanySchema(BaseModel):
     address: str | None = None
     gst_number: str | None = None
     logo: str | None = None
+    plan_code: str = "FREE"
     is_active: bool = True
 
 
@@ -289,6 +290,44 @@ class BillItemSchema(BillItemPayload):
     amount: float
 
 
+class BillPaymentPayload(BaseModel):
+    amount: float = Field(gt=0)
+    paid_on: date
+    payment_method: str = "CASH"
+    reference: str | None = Field(default=None, max_length=120)
+    notes: str | None = None
+
+    @field_validator("payment_method")
+    @classmethod
+    def valid_payment_method(cls, value: str) -> str:
+        method = value.strip().upper()
+        allowed = {"CASH", "BANK", "UPI", "CARD", "CHEQUE", "OTHER"}
+        if method not in allowed:
+            raise ValueError("payment_method must be CASH, BANK, UPI, CARD, CHEQUE or OTHER")
+        return method
+
+
+class BillPaymentSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    bill_id: int
+    amount: float
+    paid_on: date
+    payment_method: str
+    reference: str | None = None
+    notes: str | None = None
+    created_at: datetime
+
+
+class BillPaymentSummary(BaseModel):
+    bill_id: int
+    grand_total: float
+    paid_total: float
+    outstanding_total: float
+    fully_paid: bool
+    payments: list[BillPaymentSchema]
+
+
 class BillPayload(BaseModel):
     invoice_number: str | None = None
     customer_id: int
@@ -355,6 +394,54 @@ class InvoiceSettingsSchema(BaseModel):
     footer_text: str | None = None
     invoice_prefix: str = "INV"
     invoice_template: str = "template-1"
+
+
+class PlanSchema(BaseModel):
+    code: str
+    name: str
+    monthly_price_inr: int
+    bill_limit: int | None = None
+    user_limit: int | None = None
+    features: list[str]
+    rules: list[str]
+    current: bool = False
+
+
+class PlanUsageSchema(BaseModel):
+    bills_used: int
+    users_used: int
+    bill_limit: int | None = None
+    user_limit: int | None = None
+    bill_usage_percent: float | None = None
+    user_usage_percent: float | None = None
+
+
+class CurrentPlanSchema(BaseModel):
+    code: str
+    name: str
+    monthly_price_inr: int
+    bill_limit: int | None = None
+    user_limit: int | None = None
+    features: list[str]
+    rules: list[str]
+    usage: PlanUsageSchema
+
+
+class PlanSelectionPayload(BaseModel):
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def valid_code(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if normalized not in {"FREE", "PRO", "PREMIUM", "BUSINESS"}:
+            raise ValueError("Plan code must be FREE, PRO, PREMIUM or BUSINESS")
+        return normalized
+
+
+class PlanSelectionResponse(BaseModel):
+    message: str
+    current_plan: CurrentPlanSchema
 
 
 class CustomTemplateFieldSchema(BaseModel):
