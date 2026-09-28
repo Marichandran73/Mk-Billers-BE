@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user
 from app.database.connection import get_db
-from app.models import Bill, Customer, User
+from app.models import Bill, BillPayment, Customer, User
 from app.schemas import DashboardStats
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -18,7 +18,21 @@ def dashboard_stats(db: Session = Depends(get_db), user: User = Depends(get_curr
     bill_query = db.query(Bill).filter(Bill.company_id == user.company_id)
     total_bills = bill_query.count()
     total_revenue = bill_query.filter(Bill.status != "Cancelled").with_entities(func.coalesce(func.sum(Bill.grand_total), 0)).scalar()
-    pending_total = bill_query.filter(Bill.status == "Pending").with_entities(func.coalesce(func.sum(Bill.grand_total), 0)).scalar()
+    payment_totals = {
+        int(bill_id): float(amount or 0)
+        for bill_id, amount in (
+            db.query(BillPayment.bill_id, func.coalesce(func.sum(BillPayment.amount), 0))
+            .join(Bill, Bill.id == BillPayment.bill_id)
+            .filter(Bill.company_id == user.company_id)
+            .group_by(BillPayment.bill_id)
+            .all()
+        )
+    }
+    pending_bills = bill_query.filter(Bill.status == "Pending").all()
+    pending_total = sum(
+        max(float(bill.grand_total) - payment_totals.get(int(bill.id), 0), 0)
+        for bill in pending_bills
+    )
     this_month_revenue = (
         bill_query.filter(extract("month", Bill.invoice_date) == today.month, extract("year", Bill.invoice_date) == today.year, Bill.status != "Cancelled")
         .with_entities(func.coalesce(func.sum(Bill.grand_total), 0))

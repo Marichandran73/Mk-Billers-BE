@@ -23,6 +23,7 @@ class Company(Base):
     address: Mapped[str | None] = mapped_column(Text)
     gst_number: Mapped[str | None] = mapped_column(String(40))
     logo: Mapped[str | None] = mapped_column(Text)
+    plan_code: Mapped[str] = mapped_column(String(20), nullable=False, default="FREE", server_default=text("'FREE'"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -135,6 +136,7 @@ class Bill(Base):
     company: Mapped[Company] = relationship(back_populates="bills")
     customer: Mapped[Customer | None] = relationship(back_populates="bills")
     items: Mapped[list["BillItem"]] = relationship(back_populates="bill", cascade="all, delete-orphan")
+    payments: Mapped[list["BillPayment"]] = relationship(back_populates="bill", cascade="all, delete-orphan")
 
 
 class BillItem(Base):
@@ -150,6 +152,21 @@ class BillItem(Base):
     amount: Mapped[float] = mapped_column(Float, default=0, nullable=False)
 
     bill: Mapped[Bill] = relationship(back_populates="items")
+
+
+class BillPayment(Base):
+    __tablename__ = "bill_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bill_id: Mapped[int] = mapped_column(ForeignKey("bills.id", ondelete="CASCADE"), index=True, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    paid_on: Mapped[date] = mapped_column(Date, nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(30), default="CASH", nullable=False)
+    reference: Mapped[str | None] = mapped_column(String(120))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    bill: Mapped[Bill] = relationship(back_populates="payments")
 
 
 class InvoiceSettings(Base):

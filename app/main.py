@@ -40,6 +40,11 @@ def ensure_schema_updates() -> None:
                 connection.execute(text("ALTER TABLE companies ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
             else:
                 connection.execute(text("ALTER TABLE companies ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE"))
+        if "plan_code" not in company_columns:
+            if engine.dialect.name == "sqlite":
+                connection.execute(text("ALTER TABLE companies ADD COLUMN plan_code TEXT NOT NULL DEFAULT 'FREE'"))
+            else:
+                connection.execute(text("ALTER TABLE companies ADD COLUMN plan_code VARCHAR(20) NOT NULL DEFAULT 'FREE'"))
         if "is_active" not in user_columns:
             if engine.dialect.name == "sqlite":
                 connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
