@@ -3,11 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from app.api import auth, bills, company, customers, dashboard, letters, reports, settings as invoice_settings
+from app.api import auth, bills, company, customers, dashboard, founders, letters, reports, settings as invoice_settings
 from app.core.config import settings
 from app.core.security import hash_password
 from app.database.connection import Base, SessionLocal, engine
-from app.models import Company, Customer, InvoiceSettings, User
+from app.models import Company, Customer, Founder, InvoiceSettings, User
 
 app = FastAPI(title="Mk-BILLS API", version="1.0.0")
 
@@ -25,6 +25,7 @@ app.include_router(company.router, prefix="/api")
 app.include_router(customers.router, prefix="/api")
 app.include_router(bills.router, prefix="/api")
 app.include_router(letters.router, prefix="/api")
+app.include_router(founders.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
 app.include_router(invoice_settings.router, prefix="/api")
 
@@ -127,6 +128,29 @@ def seed_default_company(db: Session) -> None:
     db.commit()
 
 
+def seed_founders(db: Session) -> None:
+    # Only seeds an empty table, so edits and deletes made from the app are kept across restarts.
+    if db.query(Founder.id).first():
+        return
+    db.add_all(
+        [
+            Founder(
+                name="Mari Chandran",
+                designation="Architect of MK-BILLERS",
+                about="Designs and builds the MK-BILLERS platform.",
+                sort_order=1,
+            ),
+            Founder(
+                name="Haries Kishore",
+                designation="Social Media Marketer & Founder of MK-BILLERS",
+                about="Leads the brand, marketing, and community growth.",
+                sort_order=2,
+            ),
+        ]
+    )
+    db.commit()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
@@ -134,6 +158,7 @@ def on_startup() -> None:
     db = SessionLocal()
     try:
         seed_default_company(db)
+        seed_founders(db)
     finally:
         db.close()
 

@@ -190,6 +190,20 @@ class InvoiceSettings(Base):
     company: Mapped[Company] = relationship(back_populates="invoice_settings")
 
 
+class Founder(Base):
+    """Platform-wide founder/team profile shown on the Contact page (not company-scoped)."""
+
+    __tablename__ = "founders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    designation: Mapped[str] = mapped_column(String(160), nullable=False)
+    about: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class UserInvoiceTemplate(Base):
     __tablename__ = "user_invoice_templates"
 

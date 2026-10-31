@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_use_ssl: bool = False
     invite_code_expire_minutes: int = 60
+    frontend_url: str = "https://mkbillers.netlify.app"
     non_super_admin_bill_limit: int = 6
 
     class Config:

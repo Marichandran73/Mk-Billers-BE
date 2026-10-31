@@ -1,5 +1,8 @@
+import logging
 import secrets
+import smtplib
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import extract, func, or_
@@ -10,6 +13,8 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password, verify_password
 from app.database.connection import get_db
 from app.models import Bill, Company, Customer, InvoiceSettings, User, UserInvite
+from app.core.plans import get_plan
+from app.services.email_templates import EmailContext, EmailPurpose, list_templates_with_preview, render_email
 from app.services.mailer import send_mail
 from app.schemas import (
     AuthResponse,
@@ -17,6 +22,7 @@ from app.schemas import (
     CompanyAccessStatusPayload,
     CompanyAccessStatusResponse,
     CreateCompanyAccessPayload,
+    EmailTemplateSchema,
     ForgotPasswordPayload,
     ForgotPasswordResponse,
     InviteUserPayload,
@@ -33,6 +39,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = logging.getLogger(__name__)
 
 
 def _require_admin(user: User) -> None:
@@ -45,9 +52,9 @@ def _require_super_admin(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admin users can create companies")
 
 
-def _setup_link(token: str) -> str:
-    base_url = settings.cors_origin_list[0] if settings.cors_origin_list else "https://mkbillers.netlify.app"
-    return f"{base_url}/set-password?token={token}"
+def _setup_link(email: str, token: str) -> str:
+    query = urlencode({"email": email, "token": token})
+    return f"{settings.frontend_url.rstrip('/')}/set-password?{query}"
 
 
 def _create_setup_token(db: Session, user: User) -> tuple[str, datetime]:
@@ -66,24 +73,57 @@ def _create_setup_token(db: Session, user: User) -> tuple[str, datetime]:
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to generate verification code")
 
 
-def _send_setup_email(email: str, token: str, expires_at: datetime) -> bool:
-    setup_link = _setup_link(token)
-    try:
-        return send_mail(
+def _send_otp_email(
+    email: str,
+    token: str,
+    purpose: EmailPurpose,
+    template_id: str | None,
+    company_name: str = "MK-BILLERS",
+    role: str | None = None,
+    invited_by: str | None = None,
+) -> tuple[bool, str | None]:
+    """Returns (sent, error_message). error_message is None when sent or SMTP is not configured."""
+    rendered = render_email(
+        template_id,
+        EmailContext(
+            purpose=purpose,
             recipient=email,
-            subject="Your MK-BILLERS verification code",
-            body=(
-                "Hello,\n\n"
-                f"Use this verification code to set your password: {token}\n"
-                f"Or open this link: {setup_link}\n\n"
-                f"This code expires in {settings.invite_code_expire_minutes} minutes "
-                f"(at {expires_at.isoformat()} UTC).\n\n"
-                "If you did not request this, please ignore this email.\n"
-                "MK-BILLERS Team\n"
-            ),
+            otp=token,
+            setup_link=_setup_link(email, token),
+            expires_minutes=settings.invite_code_expire_minutes,
+            company_name=company_name,
+            role=role,
+            invited_by=invited_by,
+        ),
+    )
+    try:
+        sent = send_mail(
+            recipient=email,
+            subject=rendered.subject,
+            body=rendered.text,
+            html=rendered.html,
+            inline_images=rendered.inline_images,
         )
-    except Exception:
-        return False
+        return sent, None if sent else "SMTP is not configured on the server."
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPServerDisconnected):
+        # Gmail usually drops the connection (instead of returning 535) when the login itself is invalid.
+        logger.exception("SMTP login failed while sending OTP to %s", email)
+        return False, (
+            "SMTP login failed. For Gmail, SMTP_USER must be the full Gmail address "
+            "and SMTP_PASSWORD must be a 16-character App Password (not your normal Gmail password)."
+        )
+    except Exception as exc:
+        logger.exception("Failed to send OTP email to %s", email)
+        return False, f"Email could not be sent: {exc.__class__.__name__}: {exc}"
+
+
+@router.get("/email-templates", response_model=list[EmailTemplateSchema])
+def email_templates(
+    purpose: EmailPurpose = "invite",
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, str]]:
+    _require_admin(current_user)
+    return list_templates_with_preview(purpose)
 
 
 @router.post("/bootstrap", response_model=AuthResponse)
@@ -181,7 +221,9 @@ def invite_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> InviteUserResponse:
-    _require_admin(current_user)
+    # Team invites are managed only by the MK-BILLERS super admin.
+    if current_user.role.upper() != "SUPER_ADMIN":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only super admin can invite team members")
 
     existing_user = db.query(User).filter(User.email == payload.email).first()
     if existing_user and existing_user.company_id != current_user.company_id:
@@ -192,6 +234,18 @@ def invite_user(
 
     user = existing_user
     if not user:
+        user_limit = get_plan(current_user.company.plan_code)["user_limit"]
+        if current_user.role.upper() != "SUPER_ADMIN" and user_limit is not None:
+            active_users = (
+                db.query(User.id)
+                .filter(User.company_id == current_user.company_id, User.is_active.is_(True))
+                .count()
+            )
+            if active_users >= user_limit:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Your plan allows only {user_limit} active user(s). Upgrade plan to invite more users.",
+                )
         user = User(
             company_id=current_user.company_id,
             email=payload.email,
@@ -207,18 +261,27 @@ def invite_user(
     invite_token, expires_at = _create_setup_token(db, user)
     db.commit()
 
-    setup_link = _setup_link(invite_token)
-    email_sent = _send_setup_email(user.email, invite_token, expires_at)
+    email_sent, email_error = _send_otp_email(
+        user.email,
+        invite_token,
+        purpose="invite",
+        template_id=payload.email_template,
+        company_name=current_user.company.name,
+        role=user.role,
+        invited_by=current_user.email,
+    )
 
     return InviteUserResponse(
         message=(
-            "Access granted. Verification code has been sent to user email."
+            "Invite sent. OTP has been emailed to the user."
             if email_sent
-            else "Access granted. Email is not configured, use the code below to set password."
+            else "User created, but the OTP email was not sent. Share the OTP below with the user."
         ),
         email=user.email,
         role=user.role,
-        setup_link=None if email_sent else setup_link,
+        email_sent=email_sent,
+        email_error=email_error,
+        setup_link=None if email_sent else _setup_link(user.email, invite_token),
         verification_code=None if email_sent else invite_token,
         expires_at=expires_at.isoformat(),
     )
@@ -265,18 +328,27 @@ def create_company_access(
     verify_code, expires_at = _create_setup_token(db, admin_user)
     db.commit()
 
-    setup_link = _setup_link(verify_code)
-    email_sent = _send_setup_email(company.email, verify_code, expires_at)
+    # The OTP belongs to the admin login, so it goes to the admin email.
+    email_sent, email_error = _send_otp_email(
+        admin_user.email,
+        verify_code,
+        purpose="company",
+        template_id=payload.email_template,
+        company_name=company.name,
+        role=admin_user.role,
+    )
 
     return InviteUserResponse(
         message=(
-            "Company created and verification code sent to company email."
+            "Company created and OTP sent to the admin email."
             if email_sent
-            else "Company created. Email is not configured, use the code below to set password."
+            else "Company created, but the OTP email was not sent. Share the OTP below with the admin."
         ),
-        email=company.email,
+        email=admin_user.email,
         role=admin_user.role,
-        setup_link=None if email_sent else setup_link,
+        email_sent=email_sent,
+        email_error=email_error,
+        setup_link=None if email_sent else _setup_link(admin_user.email, verify_code),
         verification_code=None if email_sent else verify_code,
         expires_at=expires_at.isoformat(),
     )
@@ -474,24 +546,31 @@ def forgot_password(payload: ForgotPasswordPayload, db: Session = Depends(get_db
 
     reset_token, _ = _create_setup_token(db, user)
     db.commit()
+    email_sent, _ = _send_otp_email(user.email, reset_token, purpose="reset", template_id=payload.email_template)
+    if email_sent:
+        return ForgotPasswordResponse(message="An OTP has been sent to your email.", email_sent=True)
     return ForgotPasswordResponse(
-        message="If this account exists, a password reset link has been generated.",
-        # In production, email this link and avoid returning it in API responses.
-        reset_link=_setup_link(reset_token),
+        message="Email could not be sent. Use the reset link below.",
+        reset_link=_setup_link(user.email, reset_token),
     )
 
 
 @router.post("/setup-password", response_model=AuthResponse)
 def setup_password(payload: SetupPasswordPayload, db: Session = Depends(get_db)) -> AuthResponse:
+    # The OTP must match the email it was issued for, so a guessed 6-digit code alone is not enough.
     invite = (
         db.query(UserInvite)
+        .join(UserInvite.user)
         .options(joinedload(UserInvite.user).joinedload(User.company))
-        .filter(UserInvite.token == payload.token)
+        .filter(
+            UserInvite.token == payload.token.strip(),
+            func.lower(User.email) == payload.email.lower(),
+        )
         .first()
     )
     now_utc = datetime.utcnow()
     if not invite or invite.used_at is not None or invite.expires_at < now_utc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite link is invalid or expired")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP is invalid or expired")
 
     user = invite.user
     user.password_hash = hash_password(payload.password)
