@@ -63,6 +63,7 @@ class BootstrapPayload(BaseModel):
 class InviteUserPayload(BaseModel):
     email: EmailStr
     role: str = "STAFF"
+    email_template: str | None = None
 
     @field_validator("role")
     @classmethod
@@ -77,15 +78,25 @@ class CreateCompanyAccessPayload(BaseModel):
     company_name: str = Field(min_length=2, max_length=160)
     company_email: EmailStr
     admin_email: EmailStr
+    email_template: str | None = None
 
 
 class InviteUserResponse(BaseModel):
     message: str
     email: EmailStr
     role: str
+    email_sent: bool = False
+    email_error: str | None = None
     setup_link: str | None = None
     verification_code: str | None = None
     expires_at: str
+
+
+class EmailTemplateSchema(BaseModel):
+    id: str
+    name: str
+    description: str
+    preview_html: str
 
 
 class CompanySummarySchema(BaseModel):
@@ -148,16 +159,19 @@ class SuperAdminOverviewSchema(BaseModel):
 
 
 class SetupPasswordPayload(BaseModel):
+    email: EmailStr
     token: str = Field(min_length=6)
     password: str = Field(min_length=8)
 
 
 class ForgotPasswordPayload(BaseModel):
     email: EmailStr
+    email_template: str | None = None
 
 
 class ForgotPasswordResponse(BaseModel):
     message: str
+    email_sent: bool = False
     reset_link: str | None = None
 
 
@@ -272,6 +286,34 @@ class LetterPadSchema(LetterPadPayload):
     model_config = ConfigDict(from_attributes=True)
     id: int
     customer: CustomerSchema | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FounderPayload(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    designation: str = Field(min_length=1, max_length=160)
+    about: str | None = Field(default=None, max_length=500)
+    sort_order: int = 0
+
+    @field_validator("name", "designation", mode="before")
+    @classmethod
+    def required_trimmed(cls, value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("Field is required")
+        return cleaned
+
+    @field_validator("about", mode="before")
+    @classmethod
+    def optional_trimmed(cls, value: str | None) -> str | None:
+        cleaned = str(value or "").strip()
+        return cleaned or None
+
+
+class FounderSchema(FounderPayload):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
     created_at: datetime
     updated_at: datetime
 

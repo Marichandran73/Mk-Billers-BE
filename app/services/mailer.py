@@ -4,7 +4,17 @@ from email.message import EmailMessage
 from app.core.config import settings
 
 
-def send_mail(recipient: str, subject: str, body: str) -> bool:
+def send_mail(
+    recipient: str,
+    subject: str,
+    body: str,
+    html: str | None = None,
+    inline_images: dict[str, bytes] | None = None,
+) -> bool:
+    """Send an email. Returns False when SMTP is not configured; raises on SMTP errors.
+
+    inline_images maps a Content-ID to PNG bytes; reference them in the HTML as src="cid:<id>".
+    """
     if not settings.smtp_host:
         return False
 
@@ -13,6 +23,11 @@ def send_mail(recipient: str, subject: str, body: str) -> bool:
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(body)
+    if html:
+        message.add_alternative(html, subtype="html")
+        html_part = message.get_payload()[-1]
+        for content_id, data in (inline_images or {}).items():
+            html_part.add_related(data, maintype="image", subtype="png", cid=f"<{content_id}>")
 
     if settings.smtp_use_ssl:
         with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20) as smtp:
